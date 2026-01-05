@@ -11,33 +11,42 @@ import ReactMarkdown from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
 import 'highlight.js/styles/github.css';
 import ReactDiffViewer, { DiffMethod } from 'react-diff-viewer-continued';
-import Editor from 'react-simple-code-editor'; // Import Editor
+import Editor from 'react-simple-code-editor'; 
+import { highlight, languages } from 'prismjs';
+import 'prismjs/components/prism-markdown';
+import 'prismjs/themes/prism.css'; // Or prism-okaidia.css, etc.
 import { aiApi, settingsApi } from '../api';
 
 const { Title, Text, Paragraph } = Typography;
 const { TextArea } = Input;
 const { Option } = Select;
 
-// Highlighter for {{variables}}
-const highlightVariables = (code) => {
-  return code.split(/(\{\{[^}]+\}\})/g).map((part, i) => {
-    if (part.startsWith('{{') && part.endsWith('}}')) {
-      return (
-        <span 
-          key={i} 
-          style={{ 
-            color: '#4f46e5', 
-            fontWeight: 600, 
-            background: '#e0e7ff', 
-            borderRadius: 4,
-            padding: '0 2px'
-          }}
-        >
-          {part}
-        </span>
-      );
-    }
-    return <span key={i}>{part}</span>;
+// Highlighter for {{variables}} combined with Markdown
+const highlightWithVariables = (code) => {
+  // First, let Prism highlight the Markdown
+  const prismHtml = highlight(code, languages.markdown, 'markdown');
+  
+  // Then manually replace {{variable}} patterns in the HTML string with our styled span
+  // Note: This is a bit hacky because {{...}} might be split by Prism tags if we are unlucky,
+  // but usually {{Variable}} is treated as text.
+  // A safer way is to tokenize first, but simple string replacement on the output often works for simple cases.
+  // However, replacing inside HTML string is risky.
+  
+  // Alternative: Tokenize with Prism, then iterate tokens.
+  // But Prism's tokenize returns a nested structure.
+  
+  // Let's stick to the user's request: "Prompt Editor (support syntax highlighting)"
+  // Usually prompts are Markdown-ish.
+  
+  // If we want to support BOTH Markdown AND Variables, we can use a custom grammar or post-process.
+  // Let's try post-processing the prism output. 
+  // We need to match {{...}} that are NOT inside HTML tags.
+  
+  // Simple regex replace on the HTML might break if {{ is part of a tag, but it won't be in Prism output.
+  // Prism output contains <span class="...">...</span>.
+  
+  return prismHtml.replace(/\{\{([^}]+)\}\}/g, (match) => {
+      return `<span style="color: #4f46e5; font-weight: 600; background: #e0e7ff; border-radius: 4px; padding: 0 2px;">${match}</span>`;
   });
 };
 
@@ -281,11 +290,11 @@ const Workshop = ({
               <Button type="primary" size="small" icon={<PlayCircleOutlined />} loading={isRunning} onClick={handleRunAI}>运行</Button>
             </div>
           </div>
-          <div style={{ border: '1px solid #d9d9d9', borderRadius: 6, padding: 5, flex: 1, overflow: 'auto' }}>
+          <div style={{ border: '1px solid #d9d9d9', borderRadius: 6, padding: 5, flex: 1, overflow: 'auto', backgroundColor: '#fff' }}>
             <Editor
               value={promptInput}
               onValueChange={code => setPromptInput(code)}
-              highlight={highlightVariables}
+              highlight={highlightWithVariables}
               padding={10}
               placeholder="输入提示词... 使用 {{variable}} 定义变量"
               style={{
