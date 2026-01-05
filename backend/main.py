@@ -228,7 +228,9 @@ def update_settings(settings_data: AppSettings, session: Session = Depends(get_s
     settings.openai_api_key = settings_data.openai_api_key
     settings.openai_base_url = settings_data.openai_base_url
     settings.openai_model = settings_data.openai_model
+    settings.available_models = settings_data.available_models
     settings.provider = settings_data.provider
+    settings.optimize_prompt_template = settings_data.optimize_prompt_template
     
     session.add(settings)
     session.commit()
@@ -241,6 +243,68 @@ class OptimizeRequest(BaseModel):
 
 class OptimizeResponse(BaseModel):
     optimized_prompt: str
+
+class RunRequest(BaseModel):
+    prompt: str
+    negative_prompt: Optional[str] = None
+    parameters: dict = {}
+    type: str = "text" # text, image
+    model: Optional[str] = None # Override default model
+
+class RunResponse(BaseModel):
+    result: str # Text content or Image URL
+
+@app.post("/api/ai/run", response_model=RunResponse)
+def run_ai(request: RunRequest, session: Session = Depends(get_session)):
+    settings = session.get(AppSettings, 1)
+    if not settings or not settings.openai_api_key:
+        raise HTTPException(status_code=400, detail="请先在设置中配置 API Key")
+    
+    try:
+        client = OpenAI(
+            api_key=settings.openai_api_key,
+            base_url=settings.openai_base_url,
+            timeout=60.0
+        )
+
+        if request.type == "text":
+            messages = [{"role": "user", "content": request.prompt}]
+            
+            # Extract common parameters
+            temperature = float(request.parameters.get("temperature", 0.7))
+            max_tokens = int(request.parameters.get("max_tokens", 2000))
+            
+            # Use requested model or default
+            model_to_use = request.model or settings.openai_model
+
+            response = client.chat.completions.create(
+                model=model_to_use,
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+            return RunResponse(result=response.choices[0].message.content)
+            
+        elif request.type == "image":
+            # For image, we try to use OpenAI Image API (DALL-E)
+            # This is a basic implementation.
+            model_to_use = request.model or "dall-e-3"
+            
+            response = client.images.generate(
+                model=model_to_use,
+                prompt=request.prompt,
+                size="1024x1024",
+                quality="standard",
+                n=1,
+            )
+            return RunResponse(result=response.data[0].url)
+            
+        else:
+             raise HTTPException(status_code=400, detail="不支持的任务类型")
+
+    except Exception as e:
+        print(f"AI Run Error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"执行失败: {str(e)}")
 
 @app.post("/api/ai/optimize", response_model=OptimizeResponse)
 def optimize_prompt(request: OptimizeRequest, session: Session = Depends(get_session)):
@@ -256,7 +320,7 @@ def optimize_prompt(request: OptimizeRequest, session: Session = Depends(get_ses
             timeout=50.0 # Set timeout to 50 seconds
         )
         
-        system_prompt = """你是一个专业的提示词工程师 (Prompt Engineer)。
+        system_prompt = settings.optimize_prompt_template or """你是一个专业的提示词工程师 (Prompt Engineer)。
 你的任务是优化用户提供的 Prompt，使其更加清晰、结构化，并能引导 AI 生成更高质量的结果。
 请保持原意不变，但进行以下改进：
 1. 明确角色设定 (Role)

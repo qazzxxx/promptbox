@@ -1,3 +1,6 @@
 fastapi
-uvicorn
+uvicorn[standard]
 sqlmodel
+openai
+aiofiles
+python-multipart

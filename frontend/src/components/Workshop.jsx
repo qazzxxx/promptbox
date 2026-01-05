@@ -1,15 +1,45 @@
 import React, { useState, useEffect } from 'react';
-import { Typography, Button, Input, Tabs, Timeline, Tag, Empty, message, Form, Breadcrumb, Popconfirm } from 'antd';
+import { Typography, Button, Input, Tabs, Timeline, Tag, Empty, message, Form, Breadcrumb, Popconfirm, Select, Modal } from 'antd';
 import { 
   LeftOutlined, EditOutlined, RobotOutlined, SaveOutlined, 
-  CopyOutlined, CheckOutlined, DeleteOutlined, PlayCircleOutlined 
+  CopyOutlined, CheckOutlined, DeleteOutlined, PlayCircleOutlined,
+  SettingOutlined, PictureOutlined, FileTextOutlined, 
+  HistoryOutlined, DiffOutlined, UndoOutlined
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
-
-import { aiApi } from '../api';
+import ReactMarkdown from 'react-markdown';
+import rehypeHighlight from 'rehype-highlight';
+import 'highlight.js/styles/github.css';
+import ReactDiffViewer, { DiffMethod } from 'react-diff-viewer-continued';
+import Editor from 'react-simple-code-editor'; // Import Editor
+import { aiApi, settingsApi } from '../api';
 
 const { Title, Text, Paragraph } = Typography;
 const { TextArea } = Input;
+const { Option } = Select;
+
+// Highlighter for {{variables}}
+const highlightVariables = (code) => {
+  return code.split(/(\{\{[^}]+\}\})/g).map((part, i) => {
+    if (part.startsWith('{{') && part.endsWith('}}')) {
+      return (
+        <span 
+          key={i} 
+          style={{ 
+            color: '#4f46e5', 
+            fontWeight: 600, 
+            background: '#e0e7ff', 
+            borderRadius: 4,
+            padding: '0 2px'
+          }}
+        >
+          {part}
+        </span>
+      );
+    }
+    return <span key={i}>{part}</span>;
+  });
+};
 
 const Workshop = ({ 
   project, 
@@ -20,13 +50,45 @@ const Workshop = ({
   onDeleteProject 
 }) => {
   const [promptInput, setPromptInput] = useState('');
+  const [negativePrompt, setNegativePrompt] = useState('');
   const [optimizedResult, setOptimizedResult] = useState('');
   const [isOptimizing, setIsOptimizing] = useState(false);
+  const [isRunning, setIsRunning] = useState(false);
+  const [runResult, setRunResult] = useState(null); 
   const [copied, setCopied] = useState(false);
+  const [mode, setMode] = useState(project.type || 'text'); 
+  const [selectedModel, setSelectedModel] = useState(null);
+  const [availableModels, setAvailableModels] = useState([]);
   
+  // Diff & Rollback State
+  const [isDiffModalOpen, setIsDiffModalOpen] = useState(false);
+  const [diffVersion, setDiffVersion] = useState(null);
+
+  // Copy with Variables Modal State
+  const [isCopyModalOpen, setIsCopyModalOpen] = useState(false);
+
   // Variables State
   const [variables, setVariables] = useState({});
   const [previewResult, setPreviewResult] = useState('');
+
+  // Load Settings for Models
+  useEffect(() => {
+    loadSettings();
+  }, []);
+
+  const loadSettings = async () => {
+    try {
+      const s = await settingsApi.get();
+      // Parse available_models if it's string (should be list from backend now)
+      let models = s.available_models || [];
+      // Fallback if empty
+      if (models.length === 0) models = ['gpt-3.5-turbo', 'gpt-4', 'dall-e-3'];
+      setAvailableModels(models);
+      setSelectedModel(s.openai_model || models[0]);
+    } catch (e) {
+      setAvailableModels(['gpt-3.5-turbo', 'gpt-4', 'dall-e-3']);
+    }
+  };
 
   // Init
   useEffect(() => {
@@ -77,13 +139,67 @@ const Workshop = ({
     }
   };
 
+  const handleRunAI = async () => {
+    let finalPrompt = promptInput;
+    // Replace variables
+    Object.keys(variables).forEach(key => {
+      finalPrompt = finalPrompt.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), variables[key] || '');
+    });
+
+    if (!finalPrompt) return;
+
+    setIsRunning(true);
+    setRunResult(null);
+    try {
+      const res = await aiApi.run({
+        prompt: finalPrompt,
+        negative_prompt: negativePrompt,
+        type: mode,
+        model: selectedModel,
+        parameters: {} // Can add UI for params later
+      });
+      setRunResult({ type: mode, content: res.result });
+      message.success('执行完成');
+    } catch (e) {
+      // Handled
+    } finally {
+      setIsRunning(false);
+    }
+  };
+
   const handleCopy = () => {
     const text = optimizedResult || promptInput;
     if (!text) return;
+
+    // Check for variables if we are copying promptInput
+    // (If copying optimized result, it likely doesn't have vars, or we treat it as plain text)
+    // Actually, optimized result MIGHT have vars if the AI kept them.
+    // Let's check regex on the text to be copied.
+    const hasVariables = /\{\{([^}]+)\}\}/.test(text);
+
+    if (hasVariables) {
+      setIsCopyModalOpen(true);
+    } else {
+      doCopy(text);
+    }
+  };
+
+  const doCopy = (text) => {
     navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
     message.success('已复制到剪贴板');
+  };
+
+  const handleSmartCopy = (fillVariables) => {
+    let text = optimizedResult || promptInput;
+    if (fillVariables) {
+        Object.keys(variables).forEach(key => {
+            text = text.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), variables[key] || '');
+        });
+    }
+    doCopy(text);
+    setIsCopyModalOpen(false);
   };
 
   const handleTestRun = () => {
@@ -123,7 +239,7 @@ const Workshop = ({
         </div>
         <div style={{ display: 'flex', gap: 12 }}>
           <Button icon={copied ? <CheckOutlined /> : <CopyOutlined />} onClick={handleCopy}>复制</Button>
-          <Button type="primary" icon={<SaveOutlined />} onClick={() => onSaveVersion(optimizedResult || promptInput)}>保存版本</Button>
+          <Button type="primary" icon={<SaveOutlined />} onClick={() => onSaveVersion(optimizedResult || promptInput, negativePrompt, {})}>保存版本</Button>
         </div>
       </div>
 
@@ -133,15 +249,66 @@ const Workshop = ({
         {/* Left: Editor */}
         <div className="clean-card" style={{ flex: 1.2, display: 'flex', flexDirection: 'column', padding: 24 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
-            <Text strong><EditOutlined /> 提示词编辑</Text>
-            <Button type="primary" size="small" ghost icon={<RobotOutlined />} loading={isOptimizing} onClick={handleOptimize}>AI 优化</Button>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Button 
+                size="small" 
+                type={mode === 'text' ? 'primary' : 'default'} 
+                icon={<FileTextOutlined />} 
+                onClick={() => setMode('text')}
+              >
+                文本
+              </Button>
+              <Button 
+                size="small" 
+                type={mode === 'image' ? 'primary' : 'default'} 
+                icon={<PictureOutlined />} 
+                onClick={() => setMode('image')}
+              >
+                绘图
+              </Button>
+            </div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <Select 
+                 size="small" 
+                 style={{ width: 140 }} 
+                 value={selectedModel} 
+                 onChange={setSelectedModel}
+                 placeholder="选择模型"
+              >
+                 {availableModels.map(m => <Option key={m} value={m}>{m}</Option>)}
+              </Select>
+              <Button type="primary" size="small" ghost icon={<RobotOutlined />} loading={isOptimizing} onClick={handleOptimize}>AI 优化</Button>
+              <Button type="primary" size="small" icon={<PlayCircleOutlined />} loading={isRunning} onClick={handleRunAI}>运行</Button>
+            </div>
           </div>
-          <TextArea 
-            value={promptInput}
-            onChange={(e) => setPromptInput(e.target.value)}
-            style={{ flex: 1, resize: 'none', border: 'none', padding: 0, fontSize: 15, lineHeight: 1.6, boxShadow: 'none' }} 
-            placeholder="输入提示词... 使用 {{variable}} 定义变量" 
-          />
+          <div style={{ border: '1px solid #d9d9d9', borderRadius: 6, padding: 5, flex: 1, overflow: 'auto' }}>
+            <Editor
+              value={promptInput}
+              onValueChange={code => setPromptInput(code)}
+              highlight={highlightVariables}
+              padding={10}
+              placeholder="输入提示词... 使用 {{variable}} 定义变量"
+              style={{
+                fontFamily: '"Fira code", "Fira Mono", monospace',
+                fontSize: 15,
+                minHeight: '100%',
+                outline: 'none',
+              }}
+              textareaClassName="focus:outline-none" 
+            />
+          </div>
+
+          {mode === 'image' && (
+             <div style={{ marginTop: 16, borderTop: '1px solid #f1f5f9', paddingTop: 16 }}>
+                <Text strong style={{ fontSize: 13, display: 'block', marginBottom: 8 }}>反向提示词 (Negative Prompt)</Text>
+                <TextArea 
+                  value={negativePrompt}
+                  onChange={(e) => setNegativePrompt(e.target.value)}
+                  autoSize={{ minRows: 2, maxRows: 4 }}
+                  placeholder="不想看到的元素..."
+                />
+             </div>
+          )}
           
           {/* Variables Panel */}
           {Object.keys(variables).length > 0 && (
@@ -177,17 +344,39 @@ const Workshop = ({
                 label: '预览/结果',
                 children: (
                   <div style={{ padding: 24, height: '100%', display: 'flex', flexDirection: 'column', overflowY: 'auto' }}>
-                    {previewResult ? (
+                    {runResult ? (
                       <div style={{ flex: 1, overflowY: 'auto' }}>
-                        <Tag color="green" style={{ marginBottom: 12 }}>预览模式</Tag>
-                        <Paragraph style={{ whiteSpace: 'pre-wrap' }}>{previewResult}</Paragraph>
+                        <Tag color="blue" style={{ marginBottom: 12 }}>运行结果</Tag>
+                        {runResult.type === 'image' ? (
+                          <div style={{ textAlign: 'center' }}>
+                            <img src={runResult.content} alt="Generated" style={{ maxWidth: '100%', maxHeight: '400px', borderRadius: 8 }} />
+                          </div>
+                        ) : (
+                          <div className="markdown-body">
+                            <ReactMarkdown rehypePlugins={[rehypeHighlight]}>
+                              {runResult.content}
+                            </ReactMarkdown>
+                          </div>
+                        )}
+                      </div>
+                    ) : previewResult ? (
+                      <div style={{ flex: 1, overflowY: 'auto' }}>
+                        <Tag color="green" style={{ marginBottom: 12 }}>变量预览</Tag>
+                        <div className="markdown-body">
+                           <ReactMarkdown rehypePlugins={[rehypeHighlight]}>
+                             {previewResult}
+                           </ReactMarkdown>
+                        </div>
                       </div>
                     ) : optimizedResult ? (
-                      <TextArea 
-                        value={optimizedResult} 
-                        readOnly 
-                        style={{ height: '100%', resize: 'none', border: 'none', padding: 0, fontSize: 15, lineHeight: 1.6, boxShadow: 'none', background: 'transparent' }} 
-                      />
+                      <div style={{ flex: 1, overflowY: 'auto' }}>
+                         <Tag color="orange" style={{ marginBottom: 12 }}>优化建议</Tag>
+                         <div className="markdown-body">
+                            <ReactMarkdown rehypePlugins={[rehypeHighlight]}>
+                              {optimizedResult}
+                            </ReactMarkdown>
+                         </div>
+                      </div>
                     ) : (
                       <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无结果" />
@@ -208,12 +397,38 @@ const Workshop = ({
                           <div style={{ paddingBottom: 20 }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
                               <Text strong>v{v.version_num}</Text>
-                              <Text type="secondary" style={{ fontSize: 12 }}>{dayjs(v.created_at).format('MM-DD HH:mm')}</Text>
+                              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                                <Text type="secondary" style={{ fontSize: 12 }}>{dayjs(v.created_at).format('MM-DD HH:mm')}</Text>
+                                <Button 
+                                  type="text" 
+                                  size="small" 
+                                  icon={<DiffOutlined />} 
+                                  title="对比当前内容"
+                                  onClick={() => {
+                                    setDiffVersion(v);
+                                    setIsDiffModalOpen(true);
+                                  }}
+                                />
+                                <Button 
+                                  type="text" 
+                                  size="small" 
+                                  icon={<UndoOutlined />} 
+                                  title="恢复此版本"
+                                  onClick={() => {
+                                    setPromptInput(v.content);
+                                    if(v.negative_prompt) setNegativePrompt(v.negative_prompt);
+                                    message.success('已恢复版本 v' + v.version_num);
+                                  }}
+                                />
+                              </div>
                             </div>
                             <div 
                               style={{ background: '#f8fafc', padding: 12, borderRadius: 8, fontSize: 13, color: '#334155', cursor: 'pointer' }}
-                              onClick={() => setPromptInput(v.content)}
-                              title="点击恢复此版本"
+                              onClick={() => {
+                                // Default click action: just view? Or maybe removed now that we have explicit buttons.
+                                // Let's keep it as "Copy to editor" or "Preview"
+                                // For now, let's just do nothing on click since we have explicit buttons, to avoid confusion.
+                              }}
                             >
                               {v.content}
                             </div>
@@ -228,6 +443,68 @@ const Workshop = ({
           />
         </div>
       </div>
+
+      <Modal
+        title={diffVersion ? `版本对比 (v${diffVersion.version_num} vs 当前)` : '版本对比'}
+        open={isDiffModalOpen}
+        onCancel={() => setIsDiffModalOpen(false)}
+        width={1000}
+        footer={null}
+        style={{ top: 20 }}
+      >
+        <div style={{ height: '70vh', overflowY: 'auto' }}>
+          {diffVersion && (
+            <ReactDiffViewer
+              oldValue={diffVersion.content}
+              newValue={promptInput}
+              splitView={true}
+              compareMethod={DiffMethod.WORDS}
+              styles={{
+                variables: {
+                  light: {
+                    diffViewerBackground: '#fff',
+                    diffViewerTitleBackground: '#f8fafc',
+                    addedBackground: '#e6ffec',
+                    addedColor: '#24292e',
+                    removedBackground: '#ffebe9',
+                    removedColor: '#24292e',
+                    wordAddedBackground: '#acf2bd',
+                    wordRemovedBackground: '#fdb8c0',
+                  }
+                }
+              }}
+              leftTitle={`v${diffVersion.version_num} (${dayjs(diffVersion.created_at).format('MM-DD HH:mm')})`}
+              rightTitle="当前编辑内容"
+            />
+          )}
+        </div>
+      </Modal>
+
+      {/* Copy with Variables Modal */}
+      <Modal
+        title="检测到变量"
+        open={isCopyModalOpen}
+        onCancel={() => setIsCopyModalOpen(false)}
+        footer={null}
+      >
+         <Paragraph>当前提示词包含变量，请确认变量内容：</Paragraph>
+         <div style={{ maxHeight: 300, overflowY: 'auto', marginBottom: 24 }}>
+           {Object.keys(variables).map(v => (
+             <div key={v} style={{ marginBottom: 12 }}>
+               <Text strong style={{ display: 'block', marginBottom: 4 }}>{v}</Text>
+               <Input 
+                 value={variables[v]} 
+                 onChange={e => setVariables({...variables, [v]: e.target.value})}
+                 placeholder={`请输入 ${v} 的值`}
+               />
+             </div>
+           ))}
+         </div>
+         <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
+            <Button onClick={() => handleSmartCopy(false)}>复制原始模板 (保留变量)</Button>
+            <Button type="primary" onClick={() => handleSmartCopy(true)}>复制填入后内容</Button>
+         </div>
+      </Modal>
     </div>
   );
 };

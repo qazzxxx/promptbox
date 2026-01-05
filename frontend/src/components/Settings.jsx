@@ -7,6 +7,8 @@ const { Title, Text } = Typography;
 const { Option } = Select;
 const { Sider, Content } = Layout;
 
+const { TextArea } = Input;
+
 const Settings = () => {
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
@@ -106,11 +108,44 @@ const Settings = () => {
 
                 <Form.Item 
                   name="openai_model" 
-                  label="模型名称 (Model Name)" 
-                  tooltip="例如 gpt-3.5-turbo, gpt-4, claude-3-opus"
+                  label="默认模型 (Default Model)" 
+                  tooltip="例如 gpt-3.5-turbo, gpt-4"
                   rules={[{ required: true, message: '请输入模型名称' }]}
                 >
                   <Input size="large" placeholder="gpt-3.5-turbo" />
+                </Form.Item>
+
+                <Form.Item
+                  name="available_models"
+                  label="可用模型列表 (Available Models)"
+                  tooltip="以逗号分隔的模型列表，用于在运行/调试时选择。例如：gpt-3.5-turbo, gpt-4, claude-3-opus"
+                >
+                  <Select
+                     mode="tags"
+                     style={{ width: '100%' }}
+                     placeholder="输入模型名称并回车添加"
+                     size="large"
+                     tokenSeparators={[',', ' ']}
+                  />
+                </Form.Item>
+
+                <Divider />
+
+                <Title level={5} type="secondary" style={{ fontSize: 14 }}>优化提示词 (System Prompt)</Title>
+                <Form.Item 
+                  name="optimize_prompt_template" 
+                  tooltip="AI 在进行提示词优化时使用的系统指令。保持默认即可，也可根据需求自定义。"
+                  initialValue={`你是一个专业的提示词工程师 (Prompt Engineer)。
+你的任务是优化用户提供的 Prompt，使其更加清晰、结构化，并能引导 AI 生成更高质量的结果。
+请保持原意不变，但进行以下改进：
+1. 明确角色设定 (Role)
+2. 补充背景信息 (Context)
+3. 细化任务描述 (Task)
+4. 规定输出格式 (Format)
+
+请直接输出优化后的 Prompt 内容，不要包含解释性文字。`}
+                >
+                  <TextArea rows={8} placeholder="输入系统提示词..." />
                 </Form.Item>
               </div>
             )}

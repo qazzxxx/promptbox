@@ -42,4 +42,5 @@ export const settingsApi = {
 
 export const aiApi = {
   optimize: (data) => api.post('/ai/optimize', data),
+  run: (data) => api.post('/ai/run', data),
 };

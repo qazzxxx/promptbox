@@ -110,7 +110,8 @@ const App = () => {
     try {
       const newProject = await projectsApi.create({
         ...values,
-        tags: values.tags ? values.tags.split(/[,，]/).map(t => t.trim()) : []
+        tags: values.tags ? values.tags.split(/[,，]/).map(t => t.trim()) : [],
+        type: values.type || 'text'
       });
       message.success('创建成功');
       setIsProjectModalOpen(false);
@@ -163,12 +164,14 @@ const App = () => {
     } catch (e) {}
   };
 
-  const handleSaveVersion = async (content) => {
+  const handleSaveVersion = async (content, negative_prompt = null, parameters = {}) => {
     try {
       const newVersion = await projectsApi.createVersion(selectedProject.id, {
         project_id: selectedProject.id,
         version_num: 0,
         content,
+        negative_prompt,
+        parameters,
         changelog: 'Updated via Workshop'
       });
       setVersions([newVersion, ...versions]);
@@ -318,6 +321,12 @@ const App = () => {
           <Form form={projectForm} onFinish={handleCreateProject} layout="vertical" style={{ marginTop: 20 }}>
             <Form.Item name="name" label="项目名称" rules={[{ required: true }]}>
               <Input placeholder="例如：小红书文案生成" />
+            </Form.Item>
+            <Form.Item name="type" label="项目类型" initialValue="text">
+               <Radio.Group buttonStyle="solid">
+                 <Radio.Button value="text">文本 (LLM)</Radio.Button>
+                 <Radio.Button value="image">绘图 (Image)</Radio.Button>
+               </Radio.Group>
             </Form.Item>
             <Form.Item name="category_id" label="所属分类" rules={[{ required: true }]}>
               <Select placeholder="选择分类">
