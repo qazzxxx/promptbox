@@ -1,4 +1,4 @@
-# 云词 (Cloud Prompts)
+# 云词 - 云际片语，点石成金
 
 云词是一款专业的 AI 提示词 (Prompt) 管理与优化工具，旨在帮助用户高效地存储、分类、调试和优化各类 AI 模型（如 GPT-4, Claude, Midjourney 等）的提示词。
 
