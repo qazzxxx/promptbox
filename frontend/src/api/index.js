@@ -45,3 +45,9 @@ export const aiApi = {
   analyze: (data) => api.post('/ai/analyze', data),
   // run: (data) => api.post('/ai/run', data), // Disabled per user request
 };
+
+export const authApi = {
+  login: (password) => api.post('/auth/login', { password }),
+  status: () => api.get('/auth/status'),
+  logout: () => api.post('/auth/logout'),
+};

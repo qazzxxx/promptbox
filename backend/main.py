@@ -1,7 +1,8 @@
 import os
-from fastapi import FastAPI, HTTPException, Depends, Query
+import secrets
+from fastapi import FastAPI, HTTPException, Depends, Query, Request, Response
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from sqlmodel import SQLModel, Session, create_engine, select
 from sqlalchemy import func
 from typing import List, Optional
@@ -53,6 +54,42 @@ async def lifespan(app: FastAPI):
     yield
 
 app = FastAPI(lifespan=lifespan)
+
+
+# --- Auth Config ---
+SYSTEM_PASSWORD = os.getenv("SYSTEM_PASSWORD") or os.getenv("PASSWORD")
+if not SYSTEM_PASSWORD:
+    # Check file (Docker secret/volume pattern)
+    if os.path.exists("/data/password"):
+        with open("/data/password", "r") as f:
+            SYSTEM_PASSWORD = f.read().strip()
+    # Also check local file for dev convenience
+    elif os.path.exists("password.txt"):
+        with open("password.txt", "r") as f:
+            SYSTEM_PASSWORD = f.read().strip()
+
+# Session Secret (Generated once per restart)
+SESSION_SECRET = secrets.token_hex(32)
+AUTH_COOKIE_NAME = "promptbox_auth"
+
+# Global Middleware for Auth
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    # 1. If no password set, everything is open
+    if not SYSTEM_PASSWORD:
+        return await call_next(request)
+        
+    # 2. Public paths (Static files, Auth endpoints, Docs potentially)
+    path = request.url.path
+    if not path.startswith("/api") or path.startswith("/api/auth"):
+        return await call_next(request)
+        
+    # 3. Check Cookie
+    token = request.cookies.get(AUTH_COOKIE_NAME)
+    if not token or token != SESSION_SECRET:
+        return JSONResponse(status_code=401, content={"detail": "请先登录"})
+        
+    return await call_next(request)
 
 # --- Category Routes ---
 @app.get("/api/categories", response_model=List[Category])
@@ -436,6 +473,43 @@ def optimize_prompt(request: OptimizeRequest, session: Session = Depends(get_ses
         print(f"AI Error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"AI 调用失败: {str(e)}")
 
+
+
+# --- Auth Routes ---
+class LoginRequest(BaseModel):
+    password: str
+
+@app.post("/api/auth/login")
+def login(data: LoginRequest, response: Response):
+    if not SYSTEM_PASSWORD:
+        return {"ok": True, "message": "No password needed"}
+    
+    if data.password == SYSTEM_PASSWORD:
+        response.set_cookie(
+            key=AUTH_COOKIE_NAME,
+            value=SESSION_SECRET,
+            httponly=True,
+            max_age=86400 * 30, # 30 days
+            samesite="lax"
+        )
+        return {"ok": True}
+    else:
+        raise HTTPException(status_code=401, detail="密码错误")
+
+@app.get("/api/auth/status")
+def auth_status(request: Request):
+    if not SYSTEM_PASSWORD:
+        return {"enabled": False, "authenticated": True}
+    
+    token = request.cookies.get(AUTH_COOKIE_NAME)
+    is_auth = token == SESSION_SECRET
+    return {"enabled": True, "authenticated": is_auth}
+
+@app.post("/api/auth/logout")
+def logout(response: Response):
+    response.delete_cookie(key=AUTH_COOKIE_NAME)
+    return {"ok": True}
+
 # SPA Static Files Hosting
 static_dir = os.path.join(os.path.dirname(__file__), "static")
 
@@ -459,3 +533,4 @@ async def serve_spa(full_path: str):
         return FileResponse(index_path)
     
     return {"message": "前端未部署。请构建前端并将 dist 复制到 backend/static。"}
+

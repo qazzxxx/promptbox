@@ -1,16 +1,16 @@
 import React from 'react';
 import { Layout, Menu, Button, Typography, Dropdown, Modal } from 'antd';
-import { 
-  RocketOutlined, PlusOutlined, AppstoreOutlined, 
+import {
+  RocketOutlined, PlusOutlined, AppstoreOutlined,
   FolderOpenOutlined, StarOutlined, MoreOutlined,
   EditOutlined, DeleteOutlined, HolderOutlined,
-  FormOutlined, CodeOutlined, PictureOutlined, ToolOutlined, 
+  FormOutlined, CodeOutlined, PictureOutlined, ToolOutlined,
   FileTextOutlined, BulbOutlined, RobotOutlined, CoffeeOutlined,
-  SettingOutlined, SunOutlined, MoonOutlined
+  SettingOutlined, SunOutlined, MoonOutlined, LogoutOutlined
 } from '@ant-design/icons';
 import { Switch } from 'antd';
 import {
-  DndContext, 
+  DndContext,
   closestCenter,
   PointerSensor,
   useSensor,
@@ -73,7 +73,7 @@ const SortableCategoryItem = ({ category, selected, onSelect, onEdit, onDelete, 
   // Actually, standardizing on using the color directly is easiest if we assume hex or valid css.
   // If it's a preset name like 'blue', we might need a map or just let it fall back (ant icons don't support color name prop directly in style).
   const iconColor = category.color && category.color.startsWith('#') ? category.color : undefined;
-  
+
   // Hover state handling via CSS class or inline (inline is harder for hover).
   // Let's rely on a wrapper class 'sidebar-item' and add some global css or just inline simple hover logic using state is overkill.
   // We can use a simple className and inject style.
@@ -84,30 +84,30 @@ const SortableCategoryItem = ({ category, selected, onSelect, onEdit, onDelete, 
       style={style}
       className="sidebar-item"
       onClick={() => onSelect(category.id)}
-      onMouseEnter={(e) => { if(!selected) e.currentTarget.style.backgroundColor = 'rgba(0,0,0,0.04)' }}
-      onMouseLeave={(e) => { if(!selected) e.currentTarget.style.backgroundColor = 'transparent' }}
+      onMouseEnter={(e) => { if (!selected) e.currentTarget.style.backgroundColor = 'rgba(0,0,0,0.04)' }}
+      onMouseLeave={(e) => { if (!selected) e.currentTarget.style.backgroundColor = 'transparent' }}
     >
-       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 0 }}>
-          {/* Drag Handle */}
-          <div 
-            {...attributes} 
-            {...listeners} 
-            style={{ cursor: 'grab', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', padding: 4 }} 
-            onClick={e => e.stopPropagation()}
-          >
-             <HolderOutlined />
-          </div>
-          
-          <span style={{ color: iconColor, fontSize: 16, display: 'flex', alignItems: 'center' }}>
-             {IconComponent}
-          </span>
-          
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 14 }}>
-             {category.name}
-          </span>
-       </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 0 }}>
+        {/* Drag Handle */}
+        <div
+          {...attributes}
+          {...listeners}
+          style={{ cursor: 'grab', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', padding: 4 }}
+          onClick={e => e.stopPropagation()}
+        >
+          <HolderOutlined />
+        </div>
 
-       <Dropdown
+        <span style={{ color: iconColor, fontSize: 16, display: 'flex', alignItems: 'center' }}>
+          {IconComponent}
+        </span>
+
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 14 }}>
+          {category.name}
+        </span>
+      </div>
+
+      <Dropdown
         menu={{
           items: [
             { key: 'edit', label: '编辑', icon: <EditOutlined />, onClick: (e) => { e.domEvent.stopPropagation(); onEdit(category); } },
@@ -124,11 +124,11 @@ const SortableCategoryItem = ({ category, selected, onSelect, onEdit, onDelete, 
   );
 };
 
-const Sidebar = ({ 
-  categories, 
-  selectedCategory, 
-  onSelectCategory, 
-  onAddProject, 
+const Sidebar = ({
+  categories,
+  selectedCategory,
+  onSelectCategory,
+  onAddProject,
   onAddCategory,
   onEditCategory,
   onDeleteCategory,
@@ -137,8 +137,10 @@ const Sidebar = ({
   onToggleFavorites,
   showSettings,
   onToggleSettings,
+
   isDarkMode,
-  setIsDarkMode
+  setIsDarkMode,
+  onLogout
 }) => {
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
@@ -156,28 +158,28 @@ const Sidebar = ({
 
   const handleDeleteClick = (id) => {
     Modal.confirm({
-        title: '确认删除分类？',
-        content: '删除后该分类下的项目将变为"无分类"，此操作不可恢复。',
-        okText: '确认删除',
-        okType: 'danger',
-        cancelText: '取消',
-        onOk() {
-            onDeleteCategory(id);
-        }
+      title: '确认删除分类？',
+      content: '删除后该分类下的项目将变为"无分类"，此操作不可恢复。',
+      okText: '确认删除',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk() {
+        onDeleteCategory(id);
+      }
     });
   };
 
   return (
     <Sider width={260} className="minimal-sider" theme={isDarkMode ? 'dark' : 'light'} style={{ position: 'fixed', height: '100vh', left: 0, top: 0, zIndex: 10 }}>
       <div style={{ padding: '32px 24px 20px', display: 'flex', alignItems: 'center', gap: 12 }}>
-        <div style={{ 
-          width: 36, 
-          height: 36, 
-          background: 'linear-gradient(135deg, var(--primary-color) 0%, #818cf8 100%)', 
-          borderRadius: 10, 
-          display: 'flex', 
-          alignItems: 'center', 
-          justifyContent: 'center', 
+        <div style={{
+          width: 36,
+          height: 36,
+          background: 'linear-gradient(135deg, var(--primary-color) 0%, #818cf8 100%)',
+          borderRadius: 10,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
           color: '#fff',
           boxShadow: '0 4px 12px rgba(79, 70, 229, 0.25)',
           flexShrink: 0
@@ -185,22 +187,22 @@ const Sidebar = ({
           <RocketOutlined style={{ fontSize: 20 }} />
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.2 }}>
-          <Text strong style={{ 
-            fontSize: 18, 
-            color: 'var(--text-primary)', 
+          <Text strong style={{
+            fontSize: 18,
+            color: 'var(--text-primary)',
             letterSpacing: '0.5px',
             fontWeight: 700
           }}>云词</Text>
-          <Text type="secondary" style={{ 
-            fontSize: 10, 
-            textTransform: 'uppercase', 
-            letterSpacing: '1.2px', 
+          <Text type="secondary" style={{
+            fontSize: 10,
+            textTransform: 'uppercase',
+            letterSpacing: '1.2px',
             fontWeight: 500,
             opacity: 0.6
           }}>Cloud Prompts</Text>
         </div>
       </div>
-      
+
       <div style={{ padding: '12px 20px' }}>
         <Button type="primary" block icon={<PlusOutlined />} onClick={onAddProject} style={{ borderRadius: 6, fontWeight: 500 }}>
           新建项目
@@ -215,9 +217,9 @@ const Sidebar = ({
         ]}
         style={{ border: 'none', padding: '0 8px', background: 'transparent' }}
         onClick={(e) => {
-           if (e.key === 'fav') onToggleFavorites(true);
-           else if (e.key === 'settings') onToggleSettings();
-           else if (e.key === 'all') { onToggleFavorites(false); onSelectCategory(null); }
+          if (e.key === 'fav') onToggleFavorites(true);
+          else if (e.key === 'settings') onToggleSettings();
+          else if (e.key === 'all') { onToggleFavorites(false); onSelectCategory(null); }
         }}
         items={[
           { key: 'all', icon: <AppstoreOutlined />, label: '全部项目', className: !selectedCategory && !showFavorites && !showSettings ? 'ant-menu-item-selected' : '' },
@@ -231,12 +233,12 @@ const Sidebar = ({
       </div>
 
       <div style={{ padding: '0 8px', flex: 1, overflowY: 'auto' }}>
-        <DndContext 
+        <DndContext
           sensors={sensors}
           collisionDetection={closestCenter}
           onDragEnd={handleDragEnd}
         >
-          <SortableContext 
+          <SortableContext
             items={categories.map(c => c.id)}
             strategy={verticalListSortingStrategy}
           >
@@ -254,11 +256,11 @@ const Sidebar = ({
           </SortableContext>
         </DndContext>
 
-        <div 
+        <div
           onClick={onAddCategory}
-          style={{ 
-             padding: '0 12px', height: 40, display: 'flex', alignItems: 'center', gap: 10,
-             cursor: 'pointer', margin: '4px 8px', borderRadius: 8, color: 'var(--text-secondary)', fontSize: 14
+          style={{
+            padding: '0 12px', height: 40, display: 'flex', alignItems: 'center', gap: 10,
+            cursor: 'pointer', margin: '4px 8px', borderRadius: 8, color: 'var(--text-secondary)', fontSize: 14
           }}
           onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'var(--menu-selected-bg)'}
           onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
@@ -268,19 +270,34 @@ const Sidebar = ({
         </div>
       </div>
 
-      {/* Theme Toggle */}
-      <div style={{ padding: '16px 24px', borderTop: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-secondary)' }}>
-          {isDarkMode ? <MoonOutlined /> : <SunOutlined />}
-          <Text size="small" style={{ color: 'var(--text-secondary)', fontSize: 13 }}>
-            {isDarkMode ? '深色模式' : '浅色模式'}
-          </Text>
+      {/* Theme and Logout */}
+      <div style={{ padding: '16px 24px', borderTop: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-secondary)' }}>
+            {isDarkMode ? <MoonOutlined /> : <SunOutlined />}
+            <Text size="small" style={{ color: 'var(--text-secondary)', fontSize: 13 }}>
+              {isDarkMode ? '深色模式' : '浅色模式'}
+            </Text>
+          </div>
+          <Switch
+            checked={isDarkMode}
+            onChange={setIsDarkMode}
+            size="small"
+          />
         </div>
-        <Switch 
-          checked={isDarkMode} 
-          onChange={setIsDarkMode} 
-          size="small"
-        />
+
+        {onLogout && (
+          <div
+            onClick={onLogout}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-secondary)',
+              cursor: 'pointer', fontSize: 13, padding: '4px 0'
+            }}
+          >
+            <LogoutOutlined />
+            <span>退出登录</span>
+          </div>
+        )}
       </div>
     </Sider>
   );

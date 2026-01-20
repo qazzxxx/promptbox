@@ -1,8 +1,10 @@
 services:
   cloudprompts:
-    image: ghcr.io/qazzxxx/cloudprompts:latest
+    image: qazzxxx/cloudprompts:latest
     ports:
       - "8000:8000"
     volumes:
       - ./data:/data
     restart: always
+    environment:
+      - PASSWORD=qaz123
