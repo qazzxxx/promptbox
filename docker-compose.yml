@@ -1,10 +1,20 @@
+version: '3.8'
+
 services:
-  cloudprompts:
-    image: qazzxxx/cloudprompts:latest
+  backend:
+    build: ./backend
     ports:
       - "8000:8000"
+    environment:
+      - PORT=8000
+      - DATA_DIR=/data
+      - SYSTEM_PASSWORD=${SYSTEM_PASSWORD}
     volumes:
       - ./data:/data
     restart: always
-    environment:
-      - PASSWORD=qaz123
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:8000" # Map host 3000 to container 8000 (nginx serving static)
+    restart: always

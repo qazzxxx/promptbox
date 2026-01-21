@@ -1,6 +1,0 @@
-fastapi
-uvicorn[standard]
-sqlmodel
-openai
-aiofiles
-python-multipart

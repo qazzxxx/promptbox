@@ -1,8 +1,0 @@
-# 1. 激活虚拟环境
-source venv/bin/activate
-
-lsof -t -i:8000 | xargs kill -9
-
-# 2. 进入后端目录并启动
-cd backend
-uvicorn main:app --reload --port 8000

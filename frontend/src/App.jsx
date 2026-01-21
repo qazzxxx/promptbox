@@ -74,11 +74,11 @@ const App = () => {
     } else if (path === '/settings') {
       return { type: 'settings', id: null };
     } else if (path.startsWith('/category/')) {
-      const id = parseInt(path.split('/')[2]);
-      return { type: 'category', id };
+      const id = path.split('/')[2];
+      return { type: 'category', id: decodeURIComponent(id) };
     } else if (path.startsWith('/project/')) {
-      const id = parseInt(path.split('/')[2]);
-      return { type: 'project', id };
+      const id = path.split('/')[2];
+      return { type: 'project', id: decodeURIComponent(id) };
     }
     return { type: 'all', id: null };
   }, [location.pathname]);
