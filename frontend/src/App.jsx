@@ -567,7 +567,7 @@ const App = () => {
 
         <Layout style={{ marginLeft: 260, padding: '32px 40px', minHeight: '100vh' }}>
           <Routes>
-            <Route path="/settings" element={<Settings />} />
+            <Route path="/settings" element={<Settings isDarkMode={isDarkMode} />} />
             <Route path="/project/:id" element={
               selectedProject ? (
                 <Workshop
