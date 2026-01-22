@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const fs = require('fs-extra');
@@ -204,30 +205,88 @@ app.delete('/api/categories/:id', async (req, res) => {
 
 // --- Project Routes (Markdown Files) ---
 
-// Helper: Read a project file
-async function readProjectFile(catName, fileName) {
-    const filePath = path.join(DATA_DIR, catName, fileName);
+// Helper: Migrate specific file if needed (Internal use)
+async function migrateToSplitFormat(catName, fileName) {
+    const filePath = path.join(DATA_DIR, catName, fileName); // .md file
     const content = await fs.readFile(filePath, 'utf8');
     const parsed = matter(content);
 
-    return {
-        id: parsed.data.id || fileName.replace('.md', ''),
-        name: parsed.data.name || fileName.replace('.md', ''),
-        description: parsed.data.description,
-        tags: parsed.data.tags || [],
-        category_id: catName, // category_id represents the folder name
-        is_favorite: parsed.data.is_favorite || false,
-        created_at: parsed.data.created_at,
-        updated_at: parsed.data.updated_at,
-        type: parsed.data.type || 'text',
-        // In the new model, the "versions" are stored in frontmatter or we consider the body the "latest" version
-        // We can expose the body as the latest version content for simpler UI adaptation
-        versions: parsed.data.versions || [],
+    const baseName = fileName.replace('.md', '');
+    const jsonPath = path.join(DATA_DIR, catName, `${baseName}.json`);
 
-        // If versions array is empty, we can construct a virtual one from the body
-        // This helps if the user edits the file manually and just puts text in the body
-        current_content: parsed.content
-    };
+    // Only migrate if we have frontmatter data to save
+    if (Object.keys(parsed.data).length > 0) {
+        const meta = {
+            id: parsed.data.id || baseName,
+            name: parsed.data.name || baseName, // Ensure we keep the name
+            description: parsed.data.description,
+            tags: parsed.data.tags || [],
+            category_id: catName,
+            is_favorite: parsed.data.is_favorite || false,
+            created_at: parsed.data.created_at || new Date().toISOString(),
+            updated_at: parsed.data.updated_at || new Date().toISOString(),
+            type: parsed.data.type || 'text',
+            versions: parsed.data.versions || []
+        };
+
+        await fs.writeJson(jsonPath, meta, { spaces: 2 });
+        await fs.writeFile(filePath, parsed.content); // Overwrite MD with pure content
+        return meta;
+    }
+    return null;
+}
+
+// Helper: Read a project file
+async function readProjectFile(catName, fileName) {
+    const baseName = fileName.replace('.md', '').replace('.json', '');
+    const mdName = `${baseName}.md`;
+    const jsonName = `${baseName}.json`;
+
+    const mdPath = path.join(DATA_DIR, catName, mdName);
+    const jsonPath = path.join(DATA_DIR, catName, jsonName);
+
+    // 1. Try to read JSON metadata
+    if (await fs.pathExists(jsonPath)) {
+        const meta = await fs.readJson(jsonPath);
+        let content = '';
+        if (await fs.pathExists(mdPath)) {
+            content = await fs.readFile(mdPath, 'utf8');
+        }
+        return {
+            ...meta,
+            current_content: content
+        };
+    }
+
+    // 2. Fallback: Old format (MD with frontmatter) -> Migrate it now?
+    // Let's migrate on read to ensure consistency going forward
+    if (await fs.pathExists(mdPath)) {
+        const meta = await migrateToSplitFormat(catName, mdName);
+        if (meta) {
+            const content = await fs.readFile(mdPath, 'utf8');
+            return { ...meta, current_content: content };
+        }
+
+        // If no frontmatter (pure MD without JSON?), treat as basic file?
+        // Reuse old logic if migration didn't happen (shouldn't happen with matter)
+        const content = await fs.readFile(mdPath, 'utf8');
+        const parsed = matter(content);
+        return {
+            id: baseName,
+            name: baseName,
+            description: '',
+            tags: [],
+            category_id: catName,
+            is_favorite: false,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            type: 'text',
+            versions: [],
+            current_content: parsed.content
+        };
+    }
+
+    throw new Error("Project not found");
 }
 
 // Get Projects
@@ -280,7 +339,6 @@ app.get('/api/projects', async (req, res) => {
     }
 });
 
-// Create Project
 app.post('/api/projects', async (req, res) => {
     try {
         const { name, description, category_id, tags } = req.body;
@@ -290,14 +348,15 @@ app.post('/api/projects', async (req, res) => {
 
         // Generate filename
         const safeName = name.replace(/[^a-z0-9\u4e00-\u9fa5]/gi, '_').toLowerCase();
-        const fileName = `${safeName}-${Date.now()}.md`;
-        const filePath = path.join(DATA_DIR, category_id, fileName);
+        const baseName = `${safeName}-${Date.now()}`;
+        const mdName = `${baseName}.md`;
+        const jsonName = `${baseName}.json`;
 
         await fs.ensureDir(path.join(DATA_DIR, category_id));
 
         const now = new Date().toISOString();
-        const frontmatter = {
-            id: fileName.replace('.md', ''), // Use filename base as ID
+        const meta = {
+            id: baseName,
             name,
             description,
             tags: tags || [],
@@ -309,23 +368,18 @@ app.post('/api/projects', async (req, res) => {
             versions: []
         };
 
-        const fileContent = matter.stringify('', frontmatter);
-        await fs.writeFile(filePath, fileContent);
+        // Write JSON
+        await fs.writeJson(path.join(DATA_DIR, category_id, jsonName), meta, { spaces: 2 });
+        // Write Empty MD
+        await fs.writeFile(path.join(DATA_DIR, category_id, mdName), '');
 
-        res.json(await readProjectFile(category_id, fileName));
+        res.json({ ...meta, current_content: '' });
     } catch (e) {
         res.status(500).json({ error: e.message });
     }
 });
 
 app.get('/api/projects/:id', async (req, res) => {
-    // We need to find the project file. Since ID is filename-based, we might know the name, 
-    // but not the category if ID doesn't contain it. 
-    // Wait, the previous implementation used Int IDs.
-    // The frontend might expect /api/projects/:id.
-    // If we use filename as ID, we need to locate it.
-
-    // Scan all categories to find the ID
     const id = req.params.id;
     try {
         const cats = await fs.readdir(DATA_DIR);
@@ -333,21 +387,14 @@ app.get('/api/projects/:id', async (req, res) => {
             if (cat.startsWith('.')) continue;
             const catPath = path.join(DATA_DIR, cat);
             try {
-                const stat = await fs.stat(catPath);
-                if (!stat.isDirectory()) continue;
+                if (!(await fs.stat(catPath)).isDirectory()) continue;
             } catch { continue; }
 
-            // Check if file exists in this category
-            // We assume ID corresponds to filename (minus .md potentially or we store ID in frontmatter)
-            // If ID matches the filename (e.g. "project-123"), we look for "project-123.md"
-
-            const potentialFile = path.join(catPath, `${id}.md`);
-            if (await fs.pathExists(potentialFile)) {
+            // Check if file exists (MD or JSON)
+            if (await fs.pathExists(path.join(catPath, `${id}.md`)) ||
+                await fs.pathExists(path.join(catPath, `${id}.json`))) {
                 return res.json(await readProjectFile(cat, `${id}.md`));
             }
-
-            // If we stored explicit IDs in frontmatter, we'd have to parse every file which is slow.
-            // For this refactor, let's assume valid IDs are the filenames without extension.
         }
         res.status(404).json({ error: "Project not found" });
     } catch (e) {
@@ -357,17 +404,18 @@ app.get('/api/projects/:id', async (req, res) => {
 
 app.put('/api/projects/:id', async (req, res) => {
     const id = req.params.id;
-    const { name, description, tags, category_id, is_favorite } = req.body;
+    const { name, description, tags, category_id, is_favorite, current_content } = req.body;
 
     try {
-        // Find the file first
+        // Find the file
         let currentCat = null;
-        let fileName = `${id}.md`;
+        let baseName = id;
 
         const cats = await fs.readdir(DATA_DIR);
         for (const cat of cats) {
             if (cat.startsWith('.')) continue;
-            if (await fs.pathExists(path.join(DATA_DIR, cat, fileName))) {
+            if (await fs.pathExists(path.join(DATA_DIR, cat, `${baseName}.md`)) ||
+                await fs.pathExists(path.join(DATA_DIR, cat, `${baseName}.json`))) {
                 currentCat = cat;
                 break;
             }
@@ -375,35 +423,53 @@ app.put('/api/projects/:id', async (req, res) => {
 
         if (!currentCat) return res.status(404).json({ error: "Project not found" });
 
-        const filePath = path.join(DATA_DIR, currentCat, fileName);
-        const fileContent = await fs.readFile(filePath, 'utf8');
-        const parsed = matter(fileContent);
+        // Force migration if needed (ensures we have JSON to edit)
+        if (await fs.pathExists(path.join(DATA_DIR, currentCat, `${baseName}.md`)) &&
+            !await fs.pathExists(path.join(DATA_DIR, currentCat, `${baseName}.json`))) {
+            await migrateToSplitFormat(currentCat, `${baseName}.md`);
+        }
+
+        const jsonPath = path.join(DATA_DIR, currentCat, `${baseName}.json`);
+        const mdPath = path.join(DATA_DIR, currentCat, `${baseName}.md`);
+
+        const meta = await fs.readJson(jsonPath);
 
         // Update Fields
-        if (name) parsed.data.name = name;
-        if (description !== undefined) parsed.data.description = description;
-        if (tags) parsed.data.tags = tags;
-        if (is_favorite !== undefined) parsed.data.is_favorite = is_favorite;
+        if (name) meta.name = name;
+        if (description !== undefined) meta.description = description;
+        if (tags) meta.tags = tags;
+        if (is_favorite !== undefined) meta.is_favorite = is_favorite;
 
-        parsed.data.updated_at = new Date().toISOString();
+        meta.updated_at = new Date().toISOString();
+
+        // Update Content if provided
+        // Note: The frontend might pass `current_content` or just metadata.
+        // We write content to MD.
+        if (current_content !== undefined) {
+            await fs.writeFile(mdPath, current_content);
+        }
 
         // Handle Category Move
         if (category_id && category_id !== currentCat) {
             const newDir = path.join(DATA_DIR, category_id);
             await fs.ensureDir(newDir);
-            const newPath = path.join(newDir, fileName);
 
-            parsed.data.category_id = category_id;
-            const newContent = matter.stringify(parsed.content, parsed.data);
+            meta.category_id = category_id;
 
-            await fs.writeFile(newPath, newContent);
-            await fs.unlink(filePath);
+            // Move JSON
+            await fs.move(jsonPath, path.join(newDir, `${baseName}.json`));
+            // Move MD
+            if (await fs.pathExists(mdPath)) {
+                await fs.move(mdPath, path.join(newDir, `${baseName}.md`));
+            }
 
-            return res.json(await readProjectFile(category_id, fileName));
+            // Update JSON with new category
+            await fs.writeJson(path.join(newDir, `${baseName}.json`), meta, { spaces: 2 });
+
+            return res.json(await readProjectFile(category_id, baseName));
         } else {
-            const newContent = matter.stringify(parsed.content, parsed.data);
-            await fs.writeFile(filePath, newContent);
-            return res.json(await readProjectFile(currentCat, fileName));
+            await fs.writeJson(jsonPath, meta, { spaces: 2 });
+            return res.json(await readProjectFile(currentCat, baseName));
         }
 
     } catch (e) {
@@ -418,10 +484,20 @@ app.delete('/api/projects/:id', async (req, res) => {
         const cats = await fs.readdir(DATA_DIR);
         for (const cat of cats) {
             if (cat.startsWith('.')) continue;
-            if (await fs.pathExists(path.join(DATA_DIR, cat, `${id}.md`))) {
-                await fs.unlink(path.join(DATA_DIR, cat, `${id}.md`));
-                return res.json({ ok: true });
+            const mdPath = path.join(DATA_DIR, cat, `${id}.md`);
+            const jsonPath = path.join(DATA_DIR, cat, `${id}.json`);
+
+            let found = false;
+            if (await fs.pathExists(mdPath)) {
+                await fs.unlink(mdPath);
+                found = true;
             }
+            if (await fs.pathExists(jsonPath)) {
+                await fs.unlink(jsonPath);
+                found = true;
+            }
+
+            if (found) return res.json({ ok: true });
         }
         res.status(404).json({ error: "Project not found" });
     } catch (e) {
@@ -430,18 +506,16 @@ app.delete('/api/projects/:id', async (req, res) => {
 });
 
 app.post('/api/projects/:id/favorite', async (req, res) => {
-    // Toggle favorite
-    // This requires finding it, reading it, flipping bit, writing it.
-    // Reusing the PUT logic effectively
     const id = req.params.id;
     try {
         let currentCat = null;
-        let fileName = `${id}.md`;
+        let baseName = id;
 
         const cats = await fs.readdir(DATA_DIR);
         for (const cat of cats) {
             if (cat.startsWith('.')) continue;
-            if (await fs.pathExists(path.join(DATA_DIR, cat, fileName))) {
+            if (await fs.pathExists(path.join(DATA_DIR, cat, `${baseName}.md`)) ||
+                await fs.pathExists(path.join(DATA_DIR, cat, `${baseName}.json`))) {
                 currentCat = cat;
                 break;
             }
@@ -449,17 +523,19 @@ app.post('/api/projects/:id/favorite', async (req, res) => {
 
         if (!currentCat) return res.status(404).json({ error: "Project not found" });
 
-        const filePath = path.join(DATA_DIR, currentCat, fileName);
-        const parsed = matter(await fs.readFile(filePath, 'utf8'));
+        // Ensure migration
+        if (!await fs.pathExists(path.join(DATA_DIR, currentCat, `${baseName}.json`))) {
+            await migrateToSplitFormat(currentCat, `${baseName}.md`);
+        }
 
-        parsed.data.is_favorite = !parsed.data.is_favorite;
+        const jsonPath = path.join(DATA_DIR, currentCat, `${baseName}.json`);
+        const meta = await fs.readJson(jsonPath);
 
-        await fs.writeFile(filePath, matter.stringify(parsed.content, parsed.data));
+        meta.is_favorite = !meta.is_favorite;
 
-        // Fix: create a proper response object
-        const result = await readProjectFile(currentCat, fileName);
-        // Ensure it matches the frontend's Project type
-        res.json(result);
+        await fs.writeJson(jsonPath, meta, { spaces: 2 });
+
+        res.json(await readProjectFile(currentCat, baseName));
 
     } catch (e) {
         res.status(500).json({ error: e.message });
@@ -471,43 +547,53 @@ app.post('/api/projects/:id/favorite', async (req, res) => {
 // The frontend calls: POST /api/projects/:project_id/versions
 app.post('/api/projects/:id/versions', async (req, res) => {
     const id = req.params.id;
-    const { content, parameters } = req.body; // `content` is the prompt text
+    const { content, parameters } = req.body;
 
     try {
         let currentCat = null;
-        let fileName = `${id}.md`;
+        const baseName = id;
 
         const cats = await fs.readdir(DATA_DIR);
         for (const cat of cats) {
             if (cat.startsWith('.')) continue;
-            if (await fs.pathExists(path.join(DATA_DIR, cat, fileName))) {
+            if (await fs.pathExists(path.join(DATA_DIR, cat, `${baseName}.md`)) ||
+                await fs.pathExists(path.join(DATA_DIR, cat, `${baseName}.json`))) {
                 currentCat = cat;
                 break;
             }
         }
 
         if (!currentCat) return res.status(404).json({ error: "Project not found" });
-        const filePath = path.join(DATA_DIR, currentCat, fileName);
-        const parsed = matter(await fs.readFile(filePath, 'utf8'));
 
-        // Add new version to frontmatter
-        const versions = parsed.data.versions || [];
+        // Ensure migration
+        if (!await fs.pathExists(path.join(DATA_DIR, currentCat, `${baseName}.json`))) {
+            await migrateToSplitFormat(currentCat, `${baseName}.md`);
+        }
+
+        const jsonPath = path.join(DATA_DIR, currentCat, `${baseName}.json`);
+        const mdPath = path.join(DATA_DIR, currentCat, `${baseName}.md`);
+
+        const meta = await fs.readJson(jsonPath);
+
+        // Add new version
+        const versions = meta.versions || [];
         const newVersion = {
-            id: Date.now(), // Use timestamp as ID
+            id: Date.now(),
             version_num: versions.length + 1,
-            content: content || parsed.content,
+            content: content,
             parameters: parameters || {},
             created_at: new Date().toISOString()
         };
 
         versions.push(newVersion);
-        parsed.data.versions = versions;
-        parsed.data.updated_at = new Date().toISOString();
+        meta.versions = versions;
+        meta.updated_at = new Date().toISOString();
 
-        // Update the main body content to match the latest version
-        parsed.content = content || parsed.content;
+        // Save JSON
+        await fs.writeJson(jsonPath, meta, { spaces: 2 });
 
-        await fs.writeFile(filePath, matter.stringify(parsed.content, parsed.data));
+        // Update MD Content
+        await fs.writeFile(mdPath, content);
 
         res.json(newVersion);
 
@@ -520,22 +606,35 @@ app.get('/api/projects/:id/versions', async (req, res) => {
     const id = req.params.id;
     try {
         let currentCat = null;
-        let fileName = `${id}.md`;
+        const baseName = id;
 
         const cats = await fs.readdir(DATA_DIR);
         for (const cat of cats) {
             if (cat.startsWith('.')) continue;
-            if (await fs.pathExists(path.join(DATA_DIR, cat, fileName))) {
+            if (await fs.pathExists(path.join(DATA_DIR, cat, `${baseName}.md`)) ||
+                await fs.pathExists(path.join(DATA_DIR, cat, `${baseName}.json`))) {
                 currentCat = cat;
                 break;
             }
         }
 
         if (!currentCat) return res.status(404).json({ error: "Project not found" });
-        const filePath = path.join(DATA_DIR, currentCat, fileName);
-        const parsed = matter(await fs.readFile(filePath, 'utf8'));
 
-        const versions = parsed.data.versions || [];
+        // Check JSON
+        const jsonPath = path.join(DATA_DIR, currentCat, `${baseName}.json`);
+        let meta = {};
+        if (await fs.pathExists(jsonPath)) {
+            meta = await fs.readJson(jsonPath);
+        } else {
+            // Fallback to reading parsed frontmatter if migration hasn't happened yet? 
+            // Or just migrate on the fly by reading. `readProjectFile` does logical migration returning struct.
+            // But here we need versions specifically.
+            // If JSON doesn't exist, we can migrate now.
+            const migrated = await migrateToSplitFormat(currentCat, `${baseName}.md`);
+            meta = migrated || {};
+        }
+
+        const versions = meta.versions || [];
         // Sort descendant
         versions.sort((a, b) => b.version_num - a.version_num);
 
@@ -559,6 +658,41 @@ app.put('/api/settings', async (req, res) => {
         res.status(500).json({ error: e.message });
     }
 });
+
+// --- Auth Routes ---
+app.get('/api/auth/status', async (req, res) => {
+    const settings = await getSettings();
+    // Simple logic: if admin_password is set, auth is enabled.
+    // Since we don't have session middleware yet, we'll assume not authenticated if enabled, 
+    // or just properly implement a simple token check if needed.
+    // For now, to fix the 404 and let the app run, we'll return logic based on settings.
+
+    // If no password set, auth is disabled, so user is "authenticated" by default.
+    const enabled = !!settings.admin_password;
+
+    // TODO: Check for session/token cookie here if enabled.
+    // For this fix, we assume not authenticated if enabled, or authenticated if disabled.
+    const authenticated = !enabled;
+
+    res.json({ enabled, authenticated });
+});
+
+app.post('/api/auth/login', async (req, res) => {
+    const { password } = req.body;
+    const settings = await getSettings();
+
+    if (settings.admin_password && password === settings.admin_password) {
+        // TODO: Set cookie or token
+        return res.json({ ok: true });
+    }
+    return res.status(401).json({ error: "Invalid password" });
+});
+
+app.post('/api/auth/logout', (req, res) => {
+    // TODO: Clear cookie
+    res.json({ ok: true });
+});
+
 
 app.post('/api/ai/run', async (req, res) => {
     // Similar to Python logic but using Node SDK
@@ -708,8 +842,13 @@ app.post('/api/ai/optimize', async (req, res) => {
 });
 
 
-// Serve Static Files (Frontend) - if we want to bundle it
+// Serve Static Files (Frontend)
 app.use(express.static(path.join(__dirname, 'static')));
+
+// Handle SPA routing: serve index.html for any unknown routes
+app.get('*', (req, res) => {
+    res.sendFile(path.join(__dirname, 'static', 'index.html'));
+});
 
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);

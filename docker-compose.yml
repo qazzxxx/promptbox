@@ -1,8 +1,8 @@
 version: '3.8'
 
 services:
-  backend:
-    build: ./backend
+  app:
+    build: .
     ports:
       - "8000:8000"
     environment:
@@ -11,10 +11,4 @@ services:
       - SYSTEM_PASSWORD=${SYSTEM_PASSWORD}
     volumes:
       - ./data:/data
-    restart: always
-
-  frontend:
-    build: ./frontend
-    ports:
-      - "3000:8000" # Map host 3000 to container 8000 (nginx serving static)
     restart: always
